@@ -10,6 +10,15 @@ ERROR: mismatched-brain-flak-brackets program ;
 ERROR: leftover-program-after-compilation program leftover ;
 
 
+TUPLE: brain-flak
+  { active vector }
+  { inactive vector }
+  { total integer } ;
+
+: <brain-flak> ( seq -- state )
+  V{ } [ clone-like ] [ clone ] bi 0 brain-flak boa ;
+
+
 <PRIVATE
 
 : matches ( a b -- ? )
@@ -22,30 +31,35 @@ ERROR: leftover-program-after-compilation program leftover ;
     { CHAR: } CHAR: { }
     { CHAR: > CHAR: < } } at = ;
 
-: glue ( a stack2 stack1 b -- a+b stack2 stack1 ) roll + -rot ;
+: glue ( state n -- state' ) over total>> + >>total ;
 
-: (()) ( ret stack2 stack1 -- ret stack2 stack1 ) 1 glue ;
+: nested-call ( state quot -- previous-total state' )
+  [ [ total>> ] [ 0 >>total ] bi ] dip call ; inline
 
-: ([]) ( ret stack2 stack1 -- ret stack2 stack1 )
-  dup length glue ;
+: (()) ( state -- state' ) 1 glue ;
 
-: ({}) ( ret stack2 stack1 -- ret stack2 stack1 )
-  dup [ pop glue ] unless-empty ;
+: ([]) ( state -- state' ) dup active>> length glue ;
 
-: (<>) ( ret stack2 stack1 -- ret stack2 stack1 ) swap ;
+: ({}) ( state -- state' )
+  dup active>> [ pop glue ] unless-empty ;
 
-: ()) ( ret stack2 stack1 quot -- ret stack2 stack1 )
-  0 -roll call rot [ suffix! ] keep glue ; inline
+: (<>) ( state -- state' )
+  dup [ active>> ] [ inactive>> ] bi
+  [ >>inactive ] [ >>active ] bi* ;
 
-: (]) ( ret stack2 stack1 quot -- ret stack2 stack1 )
-  0 -roll call rot neg glue ; inline
+: ()) ( state quot: ( state -- state' ) -- state'' )
+  nested-call dup [ total>> ] [ active>> ] bi push
+  swap glue ; inline
 
-: (}) ( ret stack2 stack1 quot -- ret stack2 stack1 )
-  0 -roll [ dup { [ empty? ] [ last 0 = ] } 1|| ] swap until
-  rot glue ; inline
+: (]) ( state quot: ( state -- state' ) -- state'' )
+  nested-call [ neg ] change-total swap glue ; inline
 
-: (>) ( ret stack2 stack1 quot -- ret stack2 stack1 )
-  0 -roll call rot drop ; inline
+: (}) ( state quot: ( state -- state' ) -- state'' )
+  [ dup active>> { [ empty? ] [ last 0 = ] } 1|| ]
+  swap until ; inline
+
+: (>) ( state quot: ( state -- state' ) -- state'' )
+  nested-call swap >>total ; inline
 
 : compile-bf-subexpr ( vec string-like -- vec string-like )
   [ { { [ dup empty? ] [ f ] }
@@ -70,12 +84,14 @@ ERROR: leftover-program-after-compilation program leftover ;
 
 PRIVATE>
 
+: with-brain-flak ( seq quot: ( state -- state' ) -- seq' )
+  swap [ <brain-flak> swap call active>> ] keep
+  clone-like ; inline
 
-: compile-brain-flak ( string -- quote )
-  [ "()[]{}<>" in? ] filter dup
-  V{ dup V{ } clone-like 0 0 <vector> rot } clone
-  swap compile-bf-subexpr
-  [ overd leftover-program-after-compilation ] unless-empty
-  { 2nip swap clone-like } append! [ ] clone-like nip ;
+: compile-brain-flak ( string -- quote: ( state -- state' ) )
+  dup [ "()[]{}<>" in? ] filter
+  V{ } clone swap compile-bf-subexpr
+  [ nip ] [ swapd leftover-program-after-compilation ] if-empty
+  [ ] clone-like ;
 
 SYNTAX: b-f" parse-string compile-brain-flak append! ;
